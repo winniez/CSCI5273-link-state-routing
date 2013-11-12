@@ -14,6 +14,25 @@
 #define MAX_NUM_NODES 24
 #define DEBUG 1
 #define TIMEOUT 20
+#define LSP_INTERVAL 5
+
+typedef struct{
+    char dst[10];
+    int cost;
+} LinkStateEntry;
+
+/*
+ * Link State Packet struct
+ * Fields for Router ID, neighbors and link costs
+ */
+
+typedef struct {
+    char ID[10];
+    int seq;
+    int TTL;
+    int len;
+    LinkStateEntry table[MAX_DEGREE];
+} LSP;
 
 /*
  * Link struct
@@ -40,17 +59,11 @@ typedef struct {
     char ID[10];
     Link links[MAX_DEGREE];
     int link_cnt;
+    time_t send_time;  // timestamp of latest LSP sent out, second is the unit
+    LSP archieve[MAX_DEGREE];
+    LSP self_lsp;
+    int self_lsp_seq;
 } Router;
-
-/*
- * Link State Packet struct
- * Fields for Router ID, neighbors and link costs
- */
-
-typedef struct {
-    char ID[10];
-    int Seq;
-} LSP;
 
 
 /*
