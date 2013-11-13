@@ -24,11 +24,11 @@ int main(int argc, char *argv[]){
     FILE *log_file;
     char cmd_input[1024];
     int nbytes;
-    int lsp_recv_option;
+    int addr_len = sizeof(struct sockaddr_in);
     // router id
     char router_id[10];
     strcpy(router_id, argv[1]);
-    size_t rd_buffer_len = 128;
+    int rd_buffer_len = 128;
     int rd_line_len = 0;
     char line[rd_buffer_len];
     char *ptrline = &line[0];
@@ -84,6 +84,15 @@ int main(int argc, char *argv[]){
         // when connect request queuing on listening port
         // Accept is set to nonblock mode and iteratively check all ports
         
+        // set socket to non-block mode
+        /*
+        if (fcntl(router.links[i].tmp_fd, F_SETFL, O_NDELAY)<0)
+        {
+            printf("%s, %d, %s, %d: cannot set non-block mode socket.\n",
+                    router.links[i].dstA, router.links[i].dstA_port,
+                    router.links[i].dstB, router.links[i].dstB_port);
+        }
+        */
         // set address
         bzero(&router.links[i].local_addr, sizeof(router.links[i].local_addr));
         bzero(&router.links[i].remote_addr, sizeof(router.links[i].local_addr));
@@ -155,7 +164,6 @@ int main(int argc, char *argv[]){
     // initialize LSP of this router
     strcpy(router.self_lsp.ID, router.ID);
     router.self_lsp_seq = 1;
-    router.self_lsp.TTL = LSP_TTL;
     router.self_lsp.seq = router.self_lsp_seq;
     router.self_lsp.len = router.link_cnt;
     for (i=0; i<router.link_cnt; i++)
@@ -163,17 +171,14 @@ int main(int argc, char *argv[]){
         strcpy(router.self_lsp.table[i].dst, router.links[i].dstB);
         router.self_lsp.table[i].cost = router.links[i].cost;
     }    
-    // initialize router archive
-    router.lsparchive.len = 0;
-    
     // receive buffer
     LSP buffer_lsp;
     // initialize router routing table
-    Init_Routing_Table(&router);
+    Init_Routing_Table(router);
     // print routing table
     if (DEBUG)
     {
-         print_router_routing_table(&router, log_file);
+         void print_router_routing_table(Router *router, log_file);
     }    
 
 
@@ -209,8 +214,6 @@ int main(int argc, char *argv[]){
         if (difftime(cur_time, router.send_time) >= (double)5.0)
         {
             router.send_time = cur_time;
-            // update lsp seq
-            router.self_lsp.seq++;
             for (i=0; i<router.link_cnt; i++)
             {
                 if (router.links[i].connected)
@@ -238,42 +241,8 @@ int main(int argc, char *argv[]){
                 nbytes = recv(router.links[i].connect_fd, &buffer_lsp, sizeof(LSP), 0); 
                 if (nbytes > 0)
                 {   // data received
-                    printf("Received LSP with ID %s, seq %d\n", buffer_lsp.ID, buffer_lsp.seq);
-                    // store recvd lsp into database and determine if need forwarding
-                    // also determine if need update topology and recompute
-                    lsp_recv_option = update_LSP_database(&router, &buffer_lsp); 
-                    if (lsp_recv_option > 0)
-                    {// forward on other connected ports
-                        // decrement TTL of forwarding LSP
-                        buffer_lsp.TTL--;
-                        int j;
-                        for (j=0; j<router.link_cnt; j++)
-                        {
-                            if ((j != i) && (router.links[j].connected))
-                            {
-                                nbytes = send(router.links[j].connect_fd, &buffer_lsp, sizeof(LSP), 0);
-                                if (nbytes == -1)
-                                {
-                                     printf("Failed to send on link: %s, %d, %s, %d\n",
-                                             router.links[j].dstA, router.links[j].dstA_port,
-                                             router.links[j].dstB, router.links[j].dstB_port);
-                                }
-                                else
-                                {
-                                    printf("Forward LSP from %s to %s\n", buffer_lsp.ID, router.links[j].dstB);
-                                }    
-                            }    
-                        }    
-                    }
-                    if (lsp_recv_option == 2)
-                    {// run dijastra's algorithm
-                        printf("recompute routing table...\n");
-                        if (update_routing_table(&(router), &buffer_lsp, 1))
-                        {
-                            printf("Routing Table updated:\n");
-                            print_router_routing_table(&router, log_file);
-                        }    
-                    }    
+                    printf("Received LSP with ID %s\n", buffer_lsp.ID);
+
                 }
             }                
                   

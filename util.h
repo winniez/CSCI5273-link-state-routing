@@ -15,7 +15,8 @@
 #define DEBUG 1
 #define TIMEOUT 20
 #define LSP_INTERVAL 5
-
+#define LSP_TTL 10  // forwarding hop count, decrement when forwarding
+#define MAX_COST 10000
 typedef struct{
     char dst[10];
     int cost;
@@ -51,6 +52,36 @@ typedef struct {
 } Link;
 
 /*
+ * RoutingTableEntry
+ * Fields for dstination, cost, outgoing port and destination port 
+ */
+typedef struct {
+    char dst[10];
+    int cost;
+    int out_port;
+    int dst_port;
+} RoutingTableEntry;
+
+/* 
+ * RoutingTable
+ * Fields for routing table, length
+ */
+typedef struct {
+    RoutingTableEntry tableContent[MAX_NUM_NODES];
+    int len;
+} RoutingTable;
+
+/*
+ * LSParchive
+ * Fields for lsp archiving, length
+ */
+typedef struct {
+    LSP archive[MAX_DEGREE];
+    int len;
+} LSParchive;
+
+
+/*
  * Router struct
  * Fields for Router ID, Link array and number of links
  */
@@ -59,11 +90,33 @@ typedef struct {
     char ID[10];
     Link links[MAX_DEGREE];
     int link_cnt;
-    time_t send_time;  // timestamp of latest LSP sent out, second is the unit
-    LSP archieve[MAX_DEGREE];
+    time_t send_time;  // timestamp of latest LSP sent out
     LSP self_lsp;
     int self_lsp_seq;
+    RoutingTable routingtable;
+    LSParchive lsparchive;
 } Router;
+
+
+/* 
+ * Initialize routing table
+ */
+void Init_Routing_Table(Router *router)
+{
+    int i;
+    Link *link;
+    RoutingTableEntry *entry;
+    router->routingtable.len = router->link_cnt;
+    for (i=0; i<router->link_cnt; i++)
+    {
+        link = &(router->links[i]);
+        entry = &(router->routingtable.tableContent[i]);
+        strcpy(entry->dst, link->dstB);
+        entry->cost = link->cost;
+        entry->out_port = link->dstA_port;
+        entry->dst_port = link->dstB_port;
+    }    
+}    
 
 
 /*
@@ -107,11 +160,11 @@ void config_router_link(Router *router, char *fline)
 }
 
 /*
- * void print_router(Router *router)
+ * void print_router_neighbors(Router *router)
  * input: Router *router: pointer to router.
  * print router_id, number of neighbors and links
  */
-void print_router(Router *router)
+void print_router_neighbors(Router *router)
 {
     printf("Router ID: %s, num of links %d\n", router->ID, router->link_cnt);
     int i;
@@ -124,54 +177,195 @@ void print_router(Router *router)
 }
 
 /*
- * int timeout_recvfrom
- * inputs:  int sock: socket descriptor
- *          void *buf: buffer to receive msg
- *          int length: length of buffer
- *          struct sockaddr* connection: address
- * outpus:  return 1 for successfully received
- *          return 0 for timeout
+ * void print_router_routing_table(Router *router)
+ * intput:  Router *router: pointer to router
+ *          FILE *file: file to write in
+ * print routing table
+ *
  */
-int timeout_recvfrom (int sock, void *buf, int length, struct sockaddr *connection)
+void print_router_routing_table(Router *router, FILE* file)
 {
-    // printf("in timeout_recvfrom\n");
-    fd_set socks;
-    // add socket into fd_set
-    FD_ZERO(&socks);
-    FD_SET(sock, &socks);
-    struct timeval t;
-    t.tv_usec = TIMEOUT;
-    int connection_len = sizeof(connection);
+    int i;
+    char str[1024];
+    sprintf(str, "Dstination\tCost\tOut Port\tDstination Port\n");
+    if (file)
+    {
+        fwrite(str, sizeof(char), strlen(str), file);
+    }
+    if (DEBUG)
+    {
+        printf("%s", str);
+    }    
+    for (i=0; i<router->routingtable.len; i++)
+    {
+        sprintf(str, "%s\t\t%d\t\t%d\t\t%d\n",
+                router->routingtable.tableContent[i].dst,
+                router->routingtable.tableContent[i].cost,
+                router->routingtable.tableContent[i].out_port,
+                router->routingtable.tableContent[i].dst_port);
+        if (file)
+        {
+            fwrite(str, sizeof(char), strlen(str), file); 
+        }
+        if(DEBUG)
+        {
+            printf("%s", str);
+        }    
+    }    
+}    
 
-    if (select(sock + 1, &socks, NULL, NULL, &t) &&
-            recvfrom(sock, buf, length, 0, (struct sockaddr *)connection, &connection_len)>=0)
+/* 
+ * Update router archive with recvd lsp
+ * int update_LSP_database(Router *router, LSP *lsp)
+ * inputs:  Router *router
+ *          LSP *lsp, pointer to recvd lsp
+ * return:  0 for topology unchanged and router have seen this lsp before
+ *          1 for topology unchanged and router haven't seen this lsp and need forwarding to other ports
+ *          2 for changed topology and need forwarding
+ */
+int update_LSP_database(Router *router, LSP *lsp)
+{
+    // initialize return value
+    int rtn = 0;
+    int j;
+    int exist = 0;
+    // check TTL, discard lsp if TTL = 0
+    if (lsp->TTL <=0)
     {
-        return 1;
-    }
-    else
+        rtn = 0;
+        return rtn;
+    }    
+    
+    for (j=0; j<router->lsparchive.len; j++)
     {
-        return 0;
+        // identify lsp sender
+        if(strcmp(lsp->ID, router->lsparchive.archive[j].ID)==0)
+        {
+            // compare seq
+            if (lsp->seq > router->lsparchive.archive[j].seq)
+            {
+                // newer lsp, archive and forward
+                lsp->TTL = router->lsparchive.archive[j].TTL;
+                lsp->seq = router->lsparchive.archive[j].seq;
+                rtn = 1;
+                // scan table to determine if neighbor changes
+                LSP *tmplsp = &(router->lsparchive.archive[j]);
+                int k;
+                for (k=0; k<lsp->len; k++)
+                {
+                    if (strcmp(lsp->table[k].dst, tmplsp->table[k].dst)!=0)
+                    {
+                        rtn = 2;
+                        strcpy(tmplsp->table[k].dst, lsp->table[k].dst);
+                    }    
+                    if (lsp->table[k].cost != tmplsp->table[k].cost)
+                    {
+                        rtn = 2;
+                        tmplsp->table[k].cost = lsp->table[k].cost;
+                    }    
+                }    
+
+                if (tmplsp->len != lsp->len)
+                {
+                    // topology changed, update archive lsp and break
+                    tmplsp->len = lsp->len;
+                    rtn = 2;
+                }
+            }
+            // set exist
+            exist = 1;
+            // otherwise, have received this lsp before, discard this lsp   
+        }    
     }
+    // add new lsp not in archive
+    if (!exist)
+    {
+        // copy lsp
+        LSP *tmplsp = &(router->lsparchive.archive[router->lsparchive.len]);
+        strcpy(tmplsp->ID, lsp->ID);
+        tmplsp->TTL = lsp->TTL;
+        tmplsp->len = lsp->len;
+        tmplsp->seq = lsp->seq;
+        int k;
+        for (k=0; k<lsp->len; k++)
+        {
+            strcpy(tmplsp->table[k].dst, lsp->table[k].dst);
+            tmplsp->table[k].cost = lsp->table[k].cost;
+        }    
+        router->lsparchive.len++;
+        rtn = 2;
+    }    
+    return rtn;
 }
 
 /* 
- * int timeout_accept
- * inputs:  
- *          
- * output:  return 1 for successfully accept connection
- *          return 0 for timeout
+ * compute Dijastra's shortest path tree
+ * inputs:  RouteingTable *routingrable, pointer to router's routing table
+ *          LSP *lsp, lsp used to update routing table
+ *          int mode, 1 for add lsp, 0 for remove lsp
+ * output:  1 for updated routing table
+ *          0 for routing table unchanged
  */
+int update_routing_table(Router *router, LSP *lsp, int mode)
+{
+    int rtn = 0;
+    int i, j, k,newcost, basic_cost = MAX_COST;
+    int basic_out_port, basic_dst_port;
+    int exist = 0;
+    RoutingTable *routingtable = &(router->routingtable);
+    if (mode)
+    {// add lsp mode
+        // find cost between(router->ID, lsp->ID) in current routing table
+        for (i=0; i<routingtable->len; i++)
+        {
+            if(strcmp(lsp->ID, routingtable->tableContent[i].dst)==0)
+            {
+                basic_cost = routingtable->tableContent[i].cost;
+                basic_out_port = routingtable->tableContent[i].out_port; 
+                basic_dst_port = routingtable->tableContent[i].dst_port;    
+            }    
+        }    
 
-
-
-/* 
- * int timeout_connect
- * inputs:  
- *          
- * outpus:  return 1 for successfully accept connection
- *          return 0 for timeout
- *
- */
-
+        for (i=0; i<lsp->len; i++)
+        {
+            exist = 0;
+            for (j=0; j<routingtable->len; j++)
+            {
+                if(strcmp(lsp->table[i].dst, routingtable->tableContent[j].dst)==0)
+                {
+                    // destination already in routing table
+                    exist = 1;
+                    // compare cost
+                    newcost = basic_cost + lsp->table[i].cost;
+                    if (newcost < routingtable->tableContent[j].cost)
+                    {// find path with lower cost
+                        rtn = 1;
+                        routingtable->tableContent[j].cost = newcost;
+                        routingtable->tableContent[j].out_port = basic_out_port;
+                        routingtable->tableContent[j].dst_port = basic_dst_port;
+                    }    
+                }
+                if (strcmp(lsp->table[i].dst, router->ID)==0)
+                {
+                    exist = 1;
+                }    
+            }
+            if (!exist)
+            {// add dst into routing table
+                strcpy(routingtable->tableContent[routingtable->len].dst, lsp->table[i].dst);
+                newcost = basic_cost + lsp->table[i].cost;
+                routingtable->tableContent[routingtable->len].cost = newcost;
+                routingtable->tableContent[routingtable->len].out_port = basic_out_port;
+                routingtable->tableContent[routingtable->len].dst_port = basic_dst_port;
+                routingtable->len++;
+                rtn = 1;
+            }    
+        }
+    }
+    else
+    {// remove lsp info from routing table
+    }    
+    return rtn;
+}    
 
 
