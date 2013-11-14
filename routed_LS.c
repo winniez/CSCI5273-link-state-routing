@@ -67,7 +67,7 @@ int main(int argc, char *argv[]){
         printf("Failed open log file %s for router %s.\n", argv[2], argv[1]);
         exit(1);
     }
-    
+
     // create socket and set non-blocking mode
     int i =0;
     for (i=0; i<router.link_cnt; i++)
@@ -121,7 +121,7 @@ int main(int argc, char *argv[]){
                 printf("%s, %d, %s, %d: cannot open socket.\n",
                     router.links[i].dstA, router.links[i].dstA_port,
                     router.links[i].dstB, router.links[i].dstB_port);
-            }    
+            }
             // bind socket with local address
             if (bind(router.links[i].tmp_fd, (struct sockaddr*)&(router.links[i].local_addr), 
                         sizeof(router.links[i].local_addr))<0)
@@ -176,7 +176,6 @@ int main(int argc, char *argv[]){
     }
 
     // prompt
-    printf("Input exit to exit router.\n");
     while(1)
     {
         // scan all ports, accept connection on unconnected ports
@@ -269,7 +268,7 @@ int main(int argc, char *argv[]){
                         if (update_routing_table(&(router), &buffer_lsp, 1))
                         {
                             time(&cur_time);
-                            sprintf(tmp_char_buffer, "UTC:\t%s\n", asctime(gmtime(&cur_time)));
+                            sprintf(tmp_char_buffer, "UTC:\t%s", asctime(gmtime(&cur_time)));
                             printf("%s",tmp_char_buffer);
                             fwrite(tmp_char_buffer, sizeof(char), strlen(tmp_char_buffer), log_file);
                             print_lsp(&buffer_lsp, log_file);

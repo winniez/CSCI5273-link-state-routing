@@ -60,6 +60,7 @@ typedef struct {
     int cost;
     int out_port;
     int dst_port;
+    char nextHop[10];
 } RoutingTableEntry;
 
 /* 
@@ -115,8 +116,9 @@ void Init_Routing_Table(Router *router)
         entry->cost = link->cost;
         entry->out_port = link->dstA_port;
         entry->dst_port = link->dstB_port;
-    }    
-}    
+        strcpy(entry->nextHop, link->dstB);
+    }
+}
 
 
 /*
@@ -187,6 +189,9 @@ void print_router_routing_table(Router *router, FILE* file)
 {
     int i;
     char str[1024];
+    sprintf(str, "Routing table for %s\n", router->ID);
+    if (file) fwrite(str, sizeof(char), strlen(str), file);
+    if (DEBUG) printf("%s", str);
     sprintf(str, "Dstination\tCost\tOut Port\tDstination Port\n");
     if (file)
     {
@@ -215,13 +220,20 @@ void print_router_routing_table(Router *router, FILE* file)
 }
 
 /*
- *
+ * void print_lsp(LSP *lsp, FILE *file)
+ * print lsp content
+ * inputs:  LSP *lsp, pointer to lsp
+ *          FILE *file, point to file stream
  */
 void print_lsp(LSP *lsp, FILE *file)
 {
     int i;
     char str[2048];
     char tmp[24];
+    sprintf(str, "Link State Packet\n");
+    if (DEBUG) printf("%s", str);
+    if (file) fwrite(str, sizeof(char), strlen(str), file);
+
     sprintf(str, "Neighbors of %s\t", lsp->ID);
     for (i=0; i<lsp->len; i++)
     {
@@ -229,7 +241,7 @@ void print_lsp(LSP *lsp, FILE *file)
         strcat(str, "\t");
     }
     strcat(str, "\n");
-    if(DEBUG) printf("%s", str);
+    if (DEBUG) printf("%s", str);
     if (file) fwrite(str, sizeof(char), strlen(str), file);
     sprintf(str, "Link Cost\t");
     for (i = 0; i<lsp->len; i++)
@@ -277,7 +289,7 @@ int update_LSP_database(Router *router, LSP *lsp)
                 // newer lsp, archive and forward
                 router->lsparchive.archive[j].TTL = lsp->TTL;
                 router->lsparchive.archive[j].seq = lsp->seq;
-                rtn = 1;
+                rtn = 2;
                 // scan table to determine if neighbor changes
                 LSP *tmplsp = &(router->lsparchive.archive[j]);
                 int k;
@@ -351,10 +363,10 @@ int update_routing_table(Router *router, LSP *lsp, int mode)
             if(strcmp(lsp->ID, routingtable->tableContent[i].dst)==0)
             {
                 basic_cost = routingtable->tableContent[i].cost;
-                basic_out_port = routingtable->tableContent[i].out_port; 
-                basic_dst_port = routingtable->tableContent[i].dst_port;    
-            }    
-        }    
+                basic_out_port = routingtable->tableContent[i].out_port;
+                basic_dst_port = routingtable->tableContent[i].dst_port;
+            }
+        }
 
         for (i=0; i<lsp->len; i++)
         {
@@ -373,12 +385,24 @@ int update_routing_table(Router *router, LSP *lsp, int mode)
                         routingtable->tableContent[j].cost = newcost;
                         routingtable->tableContent[j].out_port = basic_out_port;
                         routingtable->tableContent[j].dst_port = basic_dst_port;
-                    }    
+                        strcpy(routingtable->tableContent[j].nextHop, lsp->ID);
+                    }
+                    if (newcost == routingtable->tableContent[i].cost)
+                    {// compare nextHop ID
+                        if (lsp->ID[0] < routingtable->tableContent[j].nextHop[0])
+                        {// find path with same cost but lower ID
+                            rtn = 1;
+                            routingtable->tableContent[j].cost = newcost;
+                            routingtable->tableContent[j].out_port = basic_out_port;
+                            routingtable->tableContent[j].dst_port = basic_dst_port;
+                            strcpy(routingtable->tableContent[j].nextHop, lsp->ID);
+                        }
+                    }
                 }
                 if (strcmp(lsp->table[i].dst, router->ID)==0)
                 {
                     exist = 1;
-                }    
+                }
             }
             if (!exist)
             {// add dst into routing table
@@ -387,9 +411,10 @@ int update_routing_table(Router *router, LSP *lsp, int mode)
                 routingtable->tableContent[routingtable->len].cost = newcost;
                 routingtable->tableContent[routingtable->len].out_port = basic_out_port;
                 routingtable->tableContent[routingtable->len].dst_port = basic_dst_port;
+                strcpy(routingtable->tableContent[routingtable->len].nextHop, lsp->ID);
                 routingtable->len++;
                 rtn = 1;
-            }    
+            }
         }
     }
     else
