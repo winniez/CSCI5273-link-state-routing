@@ -22,7 +22,7 @@ int main(int argc, char *argv[]){
 
     FILE *config_file;
     FILE *log_file;
-    char cmd_input[1024];
+    char tmp_char_buffer[1024];
     int nbytes;
     int lsp_recv_option;
     // router id
@@ -56,19 +56,18 @@ int main(int argc, char *argv[]){
     }
     // close configuration file
     fclose(config_file);
-    
+
     // print router for debug
     print_router_neighbors(&router);
 
     // open log file
-    log_file = fopen(argv[2], "w");
+    log_file = fopen(argv[2], "wb");
     if (!log_file)
     {
         printf("Failed open log file %s for router %s.\n", argv[2], argv[1]);
         exit(1);
     }
-
-
+    
     // create socket and set non-blocking mode
     int i =0;
     for (i=0; i<router.link_cnt; i++)
@@ -83,7 +82,7 @@ int main(int argc, char *argv[]){
         // if connect is unblock mode, connect would immediately return failure
         // when connect request queuing on listening port
         // Accept is set to nonblock mode and iteratively check all ports
-        
+
         // set address
         bzero(&router.links[i].local_addr, sizeof(router.links[i].local_addr));
         bzero(&router.links[i].remote_addr, sizeof(router.links[i].local_addr));
@@ -162,10 +161,10 @@ int main(int argc, char *argv[]){
     {
         strcpy(router.self_lsp.table[i].dst, router.links[i].dstB);
         router.self_lsp.table[i].cost = router.links[i].cost;
-    }    
+    }
     // initialize router archive
     router.lsparchive.len = 0;
-    
+
     // receive buffer
     LSP buffer_lsp;
     // initialize router routing table
@@ -174,8 +173,7 @@ int main(int argc, char *argv[]){
     if (DEBUG)
     {
          print_router_routing_table(&router, log_file);
-    }    
-
+    }
 
     // prompt
     printf("Input exit to exit router.\n");
@@ -200,7 +198,7 @@ int main(int argc, char *argv[]){
                                 router.links[i].dstA, router.links[i].dstA_port,
                                 router.links[i].dstB, router.links[i].dstB_port);
 
-                    }    
+                    }
                 }
             }
         }
@@ -214,8 +212,8 @@ int main(int argc, char *argv[]){
             for (i=0; i<router.link_cnt; i++)
             {
                 if (router.links[i].connected)
-                {    
-                    nbytes = send(router.links[i].connect_fd, &router.self_lsp, sizeof(LSP), 0); 
+                {
+                    nbytes = send(router.links[i].connect_fd, &router.self_lsp, sizeof(LSP), 0);
                     if (nbytes == -1) 
                     {
                         printf("Failed to send on link: %s, %d, %s, %d\n",
@@ -225,16 +223,16 @@ int main(int argc, char *argv[]){
                     else
                     {
                         printf("Send LSP to: %s\n", router.links[i].dstB);
-                    }    
+                    }
                 }
             }
-        }    
-                    
+        }
+
         // receive LSP on all ports with established link
         for (i=0; i<router.link_cnt; i++)
         {
             if (router.links[i].connected)
-            {    
+            {
                 nbytes = recv(router.links[i].connect_fd, &buffer_lsp, sizeof(LSP), 0); 
                 if (nbytes > 0)
                 {   // data received
@@ -261,24 +259,28 @@ int main(int argc, char *argv[]){
                                 else
                                 {
                                     printf("Forward LSP from %s to %s\n", buffer_lsp.ID, router.links[j].dstB);
-                                }    
-                            }    
-                        }    
+                                }
+                            }
+                        }
                     }
                     if (lsp_recv_option == 2)
                     {// run dijastra's algorithm
                         printf("recompute routing table...\n");
                         if (update_routing_table(&(router), &buffer_lsp, 1))
                         {
-                            printf("Routing Table updated:\n");
+                            time(&cur_time);
+                            sprintf(tmp_char_buffer, "UTC:\t%s\n", asctime(gmtime(&cur_time)));
+                            printf("%s",tmp_char_buffer);
+                            fwrite(tmp_char_buffer, sizeof(char), strlen(tmp_char_buffer), log_file);
+                            print_lsp(&buffer_lsp, log_file);
                             print_router_routing_table(&router, log_file);
-                        }    
-                    }    
+                        }
+                    }
                 }
-            }                
-                  
-        }    
-        
+            }
+
+        }
+
         // check input
         /*
         gets(cmd_input);
@@ -287,17 +289,16 @@ int main(int argc, char *argv[]){
             printf("Router %s exiting...\n", router.ID);
             // send exit packet 
             break;
-        }    
+        }
         */
     }
-    fclose(config_file);
+    fclose(log_file);
     // close all sockets
     for (i=0; i<router.link_cnt; i++)
     {
         close(router.links[i].connect_fd);
         close(router.links[i].tmp_fd);
-    }    
-    
+    }
     return 0;
 
 }

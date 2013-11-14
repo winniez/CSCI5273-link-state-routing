@@ -210,9 +210,39 @@ void print_router_routing_table(Router *router, FILE* file)
         if(DEBUG)
         {
             printf("%s", str);
-        }    
-    }    
-}    
+        }
+    }
+}
+
+/*
+ *
+ */
+void print_lsp(LSP *lsp, FILE *file)
+{
+    int i;
+    char str[2048];
+    char tmp[24];
+    sprintf(str, "Neighbors of %s\t", lsp->ID);
+    for (i=0; i<lsp->len; i++)
+    {
+        strcat(str, lsp->table[i].dst);
+        strcat(str, "\t");
+    }
+    strcat(str, "\n");
+    if(DEBUG) printf("%s", str);
+    if (file) fwrite(str, sizeof(char), strlen(str), file);
+    sprintf(str, "Link Cost\t");
+    for (i = 0; i<lsp->len; i++)
+    {
+        sprintf(tmp, "%d\t", lsp->table[i].cost);
+        strcat(str, tmp);
+    }
+    strcat(str, "\n");
+    if (DEBUG) printf("%s", str);
+    if (file) fwrite(str, sizeof(char), strlen(str), file);
+
+}
+
 
 /* 
  * Update router archive with recvd lsp
@@ -245,8 +275,8 @@ int update_LSP_database(Router *router, LSP *lsp)
             if (lsp->seq > router->lsparchive.archive[j].seq)
             {
                 // newer lsp, archive and forward
-                lsp->TTL = router->lsparchive.archive[j].TTL;
-                lsp->seq = router->lsparchive.archive[j].seq;
+                router->lsparchive.archive[j].TTL = lsp->TTL;
+                router->lsparchive.archive[j].seq = lsp->seq;
                 rtn = 1;
                 // scan table to determine if neighbor changes
                 LSP *tmplsp = &(router->lsparchive.archive[j]);
